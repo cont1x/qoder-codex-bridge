@@ -1,0 +1,10 @@
+{
+  "name": "qoder-bridge",
+  "interface": { "displayName": "Qoder Codex Bridge" },
+  "plugins": [{
+    "name": "qoder-codex",
+    "source": { "source": "local", "path": "./" },
+    "policy": { "installation": "AVAILABLE", "authentication": "ON_USE" },
+    "category": "Developer Tools"
+  }]
+}
