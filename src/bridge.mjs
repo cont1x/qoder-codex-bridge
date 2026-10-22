@@ -74,8 +74,8 @@ export class Bridge {
       .map(id => { const { stdout, stderr, ...job } = this.get(id); return job; })
       .sort((a, b) => b.startedAt.localeCompare(a.startedAt)).slice(0, 30);
   }
-  async compactResult(id, { waitSeconds = 25, detail = 'summary' } = {}) {
-    const deadline = Date.now() + Math.max(0, Math.min(25, waitSeconds)) * 1000;
+  async compactResult(id, { waitSeconds = 45, detail = 'summary', afterRevision, offset = 0, maxChars = 1600 } = {}) {
+    const deadline = Date.now() + Math.max(0, Math.min(45, waitSeconds)) * 1000;
     let job = this.get(id);
     while (['running', 'cancelling'].includes(job.state) && Date.now() < deadline) {
       await new Promise(resolve => setTimeout(resolve, Math.min(250, deadline - Date.now())));
@@ -83,19 +83,27 @@ export class Bridge {
     }
     if (detail === 'full') return job;
     const response = { id, state: job.state, exitCode: job.exitCode, logDirectory: job.logDirectory };
+    const delta = () => {
+      const revision = createHash('sha256').update(JSON.stringify(response)).digest('hex').slice(0, 16);
+      return revision === afterRevision ? { id, state: job.state, revision, unchanged: true } : { ...response, revision };
+    };
     if (['running', 'cancelling'].includes(job.state)) {
-      response.next = '任务仍在运行；下次调用 qoder_result 使用 waitSeconds=25，无需额外读取日志。';
-      return response;
+      response.next = '任务仍在运行；下次调用 qoder_result 使用 waitSeconds=45 并携带 afterRevision。';
+      return delta();
     }
     let parsed = job.result;
     if (!parsed) { try { parsed = JSON.parse(job.stdout); } catch {} }
     const report = typeof parsed?.result === 'string' ? parsed.result : job.stdout;
-    response.summary = report.slice(0, 1600);
-    response.truncated = report.length > 1600;
+    const start = Math.max(0, Math.floor(offset));
+    const size = Math.max(100, Math.min(4000, Math.floor(maxChars)));
+    response.summary = report.slice(start, start + size);
+    response.truncated = report.length > start + size;
+    if (response.truncated) response.nextOffset = start + size;
+    if (start) response.offset = start;
     if (job.error) response.error = String(job.error).slice(0, 800);
     if (job.state !== 'completed') response.diagnostic = job.stderr.slice(-1000);
-    response.next = '按摘要定位实际改动并验收；需要更多证据时使用 detail=full 或读取本地日志。';
-    return response;
+    response.next = response.truncated ? '报告未结束；用 offset=nextOffset 读取下一段，不必获取完整日志。' : '按实际改动验收；排障才使用 detail=full。';
+    return delta();
   }
   compactList() {
     return this.list().slice(0, 10).map(({ id, state, workspace, startedAt, exitCode }) => ({ id, state, workspace, startedAt, exitCode }));

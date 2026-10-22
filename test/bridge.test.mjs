@@ -90,3 +90,27 @@ test('等待超时返回运行状态，失败摘要保留诊断', async () => {
   const result = await failed.bridge.compactResult(job.id, { waitSeconds: 2 });
   assert.equal(result.state, 'failed'); assert.match(result.diagnostic, /missing credentials/);
 });
+test('相同结果只返回未变化状态，翻页不会被旧revision跳过', async () => {
+  const report = 'A'.repeat(1600) + '验收失败：检查未执行。' + 'B'.repeat(2000);
+  const { bridge, workspace } = setup(`console.log(JSON.stringify({subtype:'success',result:${JSON.stringify(report)}}));`);
+  const { id } = await bridge.start({ workspace, prompt: 'task' });
+  const first = await bridge.compactResult(id, { waitSeconds: 2 });
+  const same = await bridge.compactResult(id, { waitSeconds: 0, afterRevision: first.revision });
+  assert.equal(same.unchanged, true); assert.equal(same.summary, undefined);
+  assert.ok(JSON.stringify(same).length < JSON.stringify(first).length / 5);
+  const second = await bridge.compactResult(id, { waitSeconds: 0, offset: first.nextOffset, afterRevision: first.revision });
+  assert.match(second.summary, /验收失败/); assert.notEqual(second.revision, first.revision);
+  assert.equal(second.unchanged, undefined);
+  const third = await bridge.compactResult(id, { waitSeconds: 0, offset: second.nextOffset });
+  assert.equal(first.summary + second.summary + third.summary, report);
+  assert.equal(third.truncated, false);
+});
+test('状态改变时旧revision仍返回最新结果', async () => {
+  const { bridge, workspace } = setup('setTimeout(()=>console.log(JSON.stringify({result:"done"})),300);');
+  const { id } = await bridge.start({ workspace, prompt: 'task' });
+  const initial = await bridge.compactResult(id, { waitSeconds: 0 });
+  assert.equal(initial.state, 'running');
+  const result = await bridge.compactResult(id, { waitSeconds: 2, afterRevision: initial.revision });
+  assert.equal(result.state, 'completed'); assert.equal(result.summary, 'done');
+  assert.notEqual(result.revision, initial.revision);
+});
