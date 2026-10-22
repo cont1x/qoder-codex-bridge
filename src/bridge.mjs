@@ -28,7 +28,7 @@ export function discover(env = process.env) {
 }
 
 export function makePrompt({ prompt, acceptance = [] }) {
-  return `你是本次任务的代码执行者。上游 GPT/Codex 已整理以下任务，请直接在当前工作目录实现。\n遵守项目 AGENTS.md 和现有代码规范，保留无关改动。遇到缺失凭据或必须人工确认的操作，明确报告阻塞，不要假称完成。不要把实现任务再转交给 Codex。\n\n任务提示词：\n${prompt}\n\n验收标准：\n${acceptance.length ? acceptance.map((s, i) => `${i + 1}. ${s}`).join('\n') : '完成任务，并运行与改动相关的检查。'}\n\n完成实现后自行检查并在权限范围内验证；不要声称未执行的检查已通过。最后用中文简要报告（尽量600字以内）：先列实际修改的文件和阻塞事项，再列验收结果、执行过的检查及结果。无需粘贴完整代码、工具日志或重复需求。`;
+  return `你是本次任务的代码执行者。上游 GPT/Codex 已整理以下任务，请直接在当前工作目录实现。\n遵守项目 AGENTS.md 和现有代码规范，保留无关改动。遇到缺失凭据或必须人工确认的操作，明确报告阻塞，不要假称完成。不要把实现任务再转交给 Codex。\n\n任务提示词：\n${prompt}\n\n验收标准：\n${acceptance.length ? acceptance.map((s, i) => `${i + 1}. ${s}`).join('\n') : '完成任务，并运行与改动相关的检查。'}\n\n完成实现后自行检查并在权限范围内验证；不要声称未执行的检查已通过。最后用中文报告（保留完整验收证据、失败与未验证项，不设字数上限）：先列实际修改的文件和阻塞事项，再列验收结果、执行过的检查及结果。无需粘贴完整代码、工具日志或重复需求。`;
 }
 
 function alive(pid) {
@@ -98,11 +98,20 @@ export class Bridge {
     const size = Math.max(100, Math.min(4000, Math.floor(maxChars)));
     response.summary = report.slice(start, start + size);
     response.truncated = report.length > start + size;
+    response.reportChars = report.length;
+    response.unreadChars = Math.max(0, report.length - start - size);
+    response.reviewRequired = true;
+    response.diagnosticAvailable = Boolean(job.stderr.trim());
+    // Preserve visibility of denials even when the CLI otherwise reports success.
+    try {
+      const raw = JSON.parse(job.stdout);
+      if (Array.isArray(raw.permission_denials)) response.permissionDenialCount = raw.permission_denials.length;
+    } catch {}
     if (response.truncated) response.nextOffset = start + size;
     if (start) response.offset = start;
     if (job.error) response.error = String(job.error).slice(0, 800);
     if (job.state !== 'completed') response.diagnostic = job.stderr.slice(-1000);
-    response.next = response.truncated ? '报告未结束；用 offset=nextOffset 读取下一段，不必获取完整日志。' : '按实际改动验收；排障才使用 detail=full。';
+    response.next = response.truncated ? '报告未读完；必须用 offset=nextOffset 读完再验收。' : '报告读完不等于验收通过：独立审查实际差异并执行必要测试；有诊断或权限拒绝时核实完整日志。';
     return delta();
   }
   compactList() {

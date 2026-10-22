@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { Bridge } from './bridge.mjs';
 
 const bridge = new Bridge();
-const server = new McpServer({ name: 'qoder-codex', version: '1.2.0' });
+const server = new McpServer({ name: 'qoder-codex', version: '1.3.0' });
 const respond = fn => async args => {
   try { return { content: [{ type: 'text', text: JSON.stringify(await fn(args), null, 2) }] }; }
   catch (error) { return { isError: true, content: [{ type: 'text', text: error.message }] }; }

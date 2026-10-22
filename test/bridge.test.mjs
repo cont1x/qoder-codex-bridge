@@ -114,3 +114,15 @@ test('状态改变时旧revision仍返回最新结果', async () => {
   assert.equal(result.state, 'completed'); assert.equal(result.summary, 'done');
   assert.notEqual(result.revision, initial.revision);
 });
+test('成功退出仍提示独立验收、未读报告、诊断和权限拒绝', async () => {
+  const { bridge, workspace } = setup('console.error("test skipped");console.log(JSON.stringify({result:"A".repeat(1800),permission_denials:[{tool:"Bash"}]}));');
+  const { id } = await bridge.start({ workspace, prompt: 'task' });
+  const first = await bridge.compactResult(id, { waitSeconds: 2 });
+  assert.equal(first.state, 'completed'); assert.equal(first.reviewRequired, true);
+  assert.equal(first.reportChars, 1800); assert.equal(first.unreadChars, 200);
+  assert.equal(first.diagnosticAvailable, true); assert.equal(first.permissionDenialCount, 1);
+  const last = await bridge.compactResult(id, { waitSeconds: 0, offset: first.nextOffset });
+  assert.equal(last.unreadChars, 0); assert.equal(last.reviewRequired, true);
+  const full = await bridge.compactResult(id, { waitSeconds: 0, detail: 'full' });
+  assert.match(full.stderr, /test skipped/); assert.equal(JSON.parse(full.stdout).permission_denials.length, 1);
+});
