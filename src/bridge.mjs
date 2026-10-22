@@ -28,7 +28,7 @@ export function discover(env = process.env) {
 }
 
 export function makePrompt({ prompt, acceptance = [] }) {
-  return `你是本次任务的代码执行者。上游 GPT/Codex 已整理以下任务，请直接在当前工作目录实现。\n遵守项目 AGENTS.md 和现有代码规范，保留无关改动。遇到缺失凭据或必须人工确认的操作，明确报告阻塞，不要假称完成。不要把实现任务再转交给 Codex。\n\n任务提示词：\n${prompt}\n\n验收标准：\n${acceptance.length ? acceptance.map((s, i) => `${i + 1}. ${s}`).join('\n') : '完成任务，并运行与改动相关的检查。'}\n\n最后用中文报告：实际修改的文件、实现要点、执行过的检查及结果、尚未完成的事项。`;
+  return `你是本次任务的代码执行者。上游 GPT/Codex 已整理以下任务，请直接在当前工作目录实现。\n遵守项目 AGENTS.md 和现有代码规范，保留无关改动。遇到缺失凭据或必须人工确认的操作，明确报告阻塞，不要假称完成。不要把实现任务再转交给 Codex。\n\n任务提示词：\n${prompt}\n\n验收标准：\n${acceptance.length ? acceptance.map((s, i) => `${i + 1}. ${s}`).join('\n') : '完成任务，并运行与改动相关的检查。'}\n\n完成实现后自行检查并在权限范围内验证；不要声称未执行的检查已通过。最后用中文简要报告（尽量600字以内）：先列实际修改的文件和阻塞事项，再列验收结果、执行过的检查及结果。无需粘贴完整代码、工具日志或重复需求。`;
 }
 
 function alive(pid) {
@@ -73,6 +73,32 @@ export class Bridge {
     return readdirSync(this.config.data).filter(id => /^[0-9a-f-]{36}$/.test(id))
       .map(id => { const { stdout, stderr, ...job } = this.get(id); return job; })
       .sort((a, b) => b.startedAt.localeCompare(a.startedAt)).slice(0, 30);
+  }
+  async compactResult(id, { waitSeconds = 25, detail = 'summary' } = {}) {
+    const deadline = Date.now() + Math.max(0, Math.min(25, waitSeconds)) * 1000;
+    let job = this.get(id);
+    while (['running', 'cancelling'].includes(job.state) && Date.now() < deadline) {
+      await new Promise(resolve => setTimeout(resolve, Math.min(250, deadline - Date.now())));
+      job = this.get(id);
+    }
+    if (detail === 'full') return job;
+    const response = { id, state: job.state, exitCode: job.exitCode, logDirectory: job.logDirectory };
+    if (['running', 'cancelling'].includes(job.state)) {
+      response.next = '任务仍在运行；下次调用 qoder_result 使用 waitSeconds=25，无需额外读取日志。';
+      return response;
+    }
+    let parsed = job.result;
+    if (!parsed) { try { parsed = JSON.parse(job.stdout); } catch {} }
+    const report = typeof parsed?.result === 'string' ? parsed.result : job.stdout;
+    response.summary = report.slice(0, 1600);
+    response.truncated = report.length > 1600;
+    if (job.error) response.error = String(job.error).slice(0, 800);
+    if (job.state !== 'completed') response.diagnostic = job.stderr.slice(-1000);
+    response.next = '按摘要定位实际改动并验收；需要更多证据时使用 detail=full 或读取本地日志。';
+    return response;
+  }
+  compactList() {
+    return this.list().slice(0, 10).map(({ id, state, workspace, startedAt, exitCode }) => ({ id, state, workspace, startedAt, exitCode }));
   }
   async start({ workspace, prompt, acceptance = [], timeoutSeconds = 1200 }) {
     if (!isAbsolute(workspace)) throw new Error('工作目录必须是绝对路径');

@@ -67,3 +67,26 @@ test('Qoder 参数保留权限、MCP 隔离和 stdin，不使用 shell 绕过', 
   assert.ok(args.includes('--print')); assert.equal(args[args.indexOf('--permission-mode') + 1], 'accept_edits');
   assert.ok(args.includes('--strict-mcp-config')); assert.ok(!args.includes('--yolo'));
 });
+test('默认等待短任务完成，精简摘要去掉重复日志并保留完整排障入口', async () => {
+  const report = '完成报告'.repeat(1500);
+  const { bridge, workspace } = setup(`console.error('diagnostic'.repeat(3000));console.log(JSON.stringify({subtype:'success',result:${JSON.stringify(report)}}));`);
+  const { id } = await bridge.start({ workspace, prompt: 'task' });
+  const summary = await bridge.compactResult(id, { waitSeconds: 2 });
+  assert.equal(summary.state, 'completed'); assert.equal(summary.summary.length, 1600);
+  assert.equal(summary.truncated, true); assert.equal(summary.stdout, undefined); assert.equal(summary.stderr, undefined);
+  const full = await bridge.compactResult(id, { waitSeconds: 0, detail: 'full' });
+  assert.ok(full.stdout.includes(report)); assert.ok(full.stderr.includes('diagnostic'));
+  assert.ok(JSON.stringify(summary).length < JSON.stringify(full).length / 5);
+  assert.equal(bridge.compactList()[0].result, undefined);
+});
+test('等待超时返回运行状态，失败摘要保留诊断', async () => {
+  const { bridge, workspace } = setup('process.stdin.resume();setInterval(()=>{},1000);');
+  const { id } = await bridge.start({ workspace, prompt: 'task' });
+  const summary = await bridge.compactResult(id, { waitSeconds: 0 });
+  assert.equal(summary.state, 'running'); assert.equal(summary.summary, undefined);
+  bridge.cancel(id); await finished(bridge, id);
+  const failed = setup('console.error("missing credentials");process.exit(1);');
+  const job = await failed.bridge.start({ workspace: failed.workspace, prompt: 'task' });
+  const result = await failed.bridge.compactResult(job.id, { waitSeconds: 2 });
+  assert.equal(result.state, 'failed'); assert.match(result.diagnostic, /missing credentials/);
+});

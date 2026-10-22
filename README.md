@@ -4,6 +4,12 @@
 
 这是安装在 Codex 中的本地 MCP 插件。支持通过 Qoder Launcher 的安装记录定位 Qoder 自带的后台 worker，也支持单独安装的 `qodercli`。后台执行任务，不向桌面聊天输入框模拟键盘输入。
 
+## 1.1 节省 Codex 上下文
+
+默认启用：提交任务和查询结果在服务端最多等待25秒，减少短间隔轮询；完成后只返回最多1600字符的报告摘要，不重复回传JSON原文和日志；历史列表仅包含最近10次任务的关键状态。完整报告和日志仍在本机保留，排障时调用 `qoder_result(detail="full")` 获取。`waitSeconds=0` 可立即返回。
+
+调用规则让 Qoder 自行探索实现细节并自检，Codex 聚焦需求与关键验收。不会自动更改 Codex 模型、思考强度或账号限额。减少上下文和交互预计能降低部分 Codex 消耗，但实际幅度依任务与平台计量而变；Qoder 仍按自身规则消耗额度。
+
 ## 安装
 
 当前在 Windows x64 + Node.js 24 + Qoder 0.4.8 环境验证。需要 Node.js 20+、Git 和 Codex CLI。
@@ -37,16 +43,16 @@ npm run login
 | 工具 | 用途 |
 | --- | --- |
 | `qoder_health` | 检查 Launcher、后台入口和日志路径；不验证账号登录 |
-| `qoder_start` | 提交 GPT 编写的提示词、绝对工作目录和验收标准，立即返回任务 ID |
-| `qoder_result` | 查询状态、结果和输出日志 |
-| `qoder_list` | 查看最近 30 次任务 |
+| `qoder_start` | 提交任务，最多等待25秒，返回任务 ID 和精简状态/报告 |
+| `qoder_result` | 最多等待25秒后返回摘要，排障时可选 full |
+| `qoder_list` | 查看最近 10 次任务的关键状态 |
 | `qoder_cancel` | 终止任务进程，保留已经写入的文件 |
 
 提示词通过 stdin 传递，不拼接为 shell 命令。相同项目目录有文件锁，防止本插件并发写同一目录。默认超时 20 分钟，最大 2 小时。正常退出仍需由 Codex 读取代码差异并验收。
 
 默认使用 Qoder 的 `accept_edits` 权限模式：允许项目文件编辑，其他需要确认的操作可能被 Qoder 拒绝；插件不使用 `--yolo`。运行测试等受限操作可由 Codex 在验收阶段执行。Qoder 会话不加载外部 MCP 服务，避免模型通过其他桥接服务递归转交任务。
 
-任务记录位于 `%USERPROFILE%/.codex/qoder-bridge/runs/<任务ID>/`，含 `prompt.md`、`status.json`、`stdout.log` 和 `stderr.log`。每路日志最多 8MB，查询返回最后 24000 字符。日志可能含项目代码，请自行按需清理，不要提交到公开仓库。
+任务记录位于 `%USERPROFILE%/.codex/qoder-bridge/runs/<任务ID>/`，含 `prompt.md`、`status.json`、`stdout.log` 和 `stderr.log`。每路日志最多 8MB；full 查询返回每路最后 24000 字符。日志可能含项目代码，请自行按需清理，不要提交到公开仓库。
 
 ## 配置
 
